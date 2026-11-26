@@ -31,20 +31,30 @@ const PALETTE: [Color32; 8] = [
 ];
 
 fn peak(q: &[&std::collections::VecDeque<f32>], floor: f32) -> f32 {
-    q.iter().flat_map(|d| d.iter().copied()).fold(floor, f32::max)
+    q.iter()
+        .flat_map(|d| d.iter().copied())
+        .fold(floor, f32::max)
 }
 
 fn stacked(ui: &mut Ui, s: &Settings, parts: &[(f32, Color32)], height: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let p = ui.painter_at(rect);
-    p.rect_filled(rect, Rounding::same((s.rounding * 0.5).min(10.0)), s.pal().panel2);
+    p.rect_filled(
+        rect,
+        Rounding::same((s.rounding * 0.5).min(10.0)),
+        s.pal().panel2,
+    );
     let mut x = rect.left();
     for (f, c) in parts {
         let w = (rect.width() * f).max(2.0).min(rect.right() - x);
         if w <= 0.0 {
             break;
         }
-        p.rect_filled(Rect::from_min_size(pos2(x, rect.top()), vec2(w, height)), Rounding::ZERO, *c);
+        p.rect_filled(
+            Rect::from_min_size(pos2(x, rect.top()), vec2(w, height)),
+            Rounding::ZERO,
+            *c,
+        );
         x += w + 1.0;
     }
 }
@@ -55,7 +65,17 @@ fn primary_disk(d: &[DiskRow]) -> Option<&DiskRow> {
         .or_else(|| d.iter().max_by_key(|x| x.total))
 }
 
-fn metric(ui: &mut Ui, s: &Settings, title: &str, frac: f32, label: &str, sub: &str, series: &[(&std::collections::VecDeque<f32>, Color32)], max: f32, color: Color32) {
+fn metric(
+    ui: &mut Ui,
+    s: &Settings,
+    title: &str,
+    frac: f32,
+    label: &str,
+    sub: &str,
+    series: &[(&std::collections::VecDeque<f32>, Color32)],
+    max: f32,
+    color: Color32,
+) {
     card(ui, s, title, |ui| {
         ui.horizontal(|ui| {
             ring(ui, s, frac, color, 78.0, label);
@@ -76,31 +96,109 @@ pub fn general(ui: &mut Ui, s: &Settings, st: &State) {
         ui.label("Collecting first sample…");
         return;
     }
-    let ram = if sn.mem_total > 0 { sn.mem_used as f32 / sn.mem_total as f32 } else { 0.0 };
+    let ram = if sn.mem_total > 0 {
+        sn.mem_used as f32 / sn.mem_total as f32
+    } else {
+        0.0
+    };
     let temp = sn.temps.iter().map(|t| t.1).fold(f32::MIN, f32::max);
-    let cpu_sub = format!("{} threads · {:.2} GHz{}", sn.cores.len(), sn.freq_mhz as f32 / 1000.0, if temp > 0.0 { format!(" · {temp:.0}°C") } else { String::new() });
+    let cpu_sub = format!(
+        "{} threads · {:.2} GHz{}",
+        sn.cores.len(),
+        sn.freq_mhz as f32 / 1000.0,
+        if temp > 0.0 {
+            format!(" · {temp:.0}°C")
+        } else {
+            String::new()
+        }
+    );
 
     ui.columns(3, |c| {
-        metric(&mut c[0], s, "CPU", sn.cpu / 100.0, &format!("{:.0}%", sn.cpu), &cpu_sub, &[(&h.cpu, C_CPU)], 100.0, C_CPU);
-        match &sn.gpu {
+        metric(
+            &mut c[0],
+            s,
+            "CPU",
+            sn.cpu / 100.0,
+            &format!("{:.0}%", sn.cpu),
+            &cpu_sub,
+            &[(&h.cpu, C_CPU)],
+            100.0,
+            C_CPU,
+        );
+        match sn.gpus.first() {
             Some(g) => {
-                let sub = format!("{}{}{}", g.name, g.temp.map(|t| format!(" · {t:.0}°C")).unwrap_or_default(), g.power_w.map(|w| format!(" · {w:.0} W")).unwrap_or_default());
-                metric(&mut c[1], s, "GPU", g.util / 100.0, &format!("{:.0}%", g.util), &sub, &[(&h.gpu, C_GPU)], 100.0, C_GPU);
+                let avg_util =
+                    sn.gpus.iter().map(|gpu| gpu.util).sum::<f32>() / sn.gpus.len() as f32;
+                let names = sn
+                    .gpus
+                    .iter()
+                    .map(|gpu| gpu.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sub = format!(
+                    "{}{}",
+                    names,
+                    g.temp.map(|t| format!(" · {t:.0}°C")).unwrap_or_default()
+                );
+                metric(
+                    &mut c[1],
+                    s,
+                    "GPU",
+                    avg_util / 100.0,
+                    &format!("{avg_util:.0}%"),
+                    &sub,
+                    &[(&h.gpu, C_GPU)],
+                    100.0,
+                    C_GPU,
+                );
             }
             None => card(&mut c[1], s, "GPU", |ui| {
                 ui.label(mute(s, "No supported GPU telemetry found."));
-                ui.label(mute(s, "NVIDIA needs nvidia-smi; AMD is read from sysfs on Linux."));
+                ui.label(mute(
+                    s,
+                    "NVIDIA needs nvidia-smi; AMD is read from sysfs on Linux.",
+                ));
             }),
         }
-        metric(&mut c[2], s, "Memory (RAM)", ram, &format!("{:.0}%", ram * 100.0), &format!("{} / {}  ·  swap {}", bytes(sn.mem_used), bytes(sn.mem_total), bytes(sn.swap_used)), &[(&h.ram, C_RAM)], 100.0, C_RAM);
+        metric(
+            &mut c[2],
+            s,
+            "Memory (RAM)",
+            ram,
+            &format!("{:.0}%", ram * 100.0),
+            &format!(
+                "{} / {}  ·  swap {}",
+                bytes(sn.mem_used),
+                bytes(sn.mem_total),
+                bytes(sn.swap_used)
+            ),
+            &[(&h.ram, C_RAM)],
+            100.0,
+            C_RAM,
+        );
     });
     ui.add_space(8.0);
 
     ui.columns(3, |c| {
-        match &sn.gpu {
-            Some(g) if g.vram_total > 0 => {
-                let f = g.vram_used as f32 / g.vram_total as f32;
-                metric(&mut c[0], s, "GPU memory (VRAM)", f, &format!("{:.0}%", f * 100.0), &format!("{} / {}", bytes(g.vram_used), bytes(g.vram_total)), &[(&h.vram, C_VRAM)], 100.0, C_VRAM);
+        match sn
+            .gpus
+            .iter()
+            .map(|g| (g.vram_used, g.vram_total))
+            .reduce(|a, b| (a.0 + b.0, a.1 + b.1))
+        {
+            Some((used, total)) if total > 0 => {
+                let f = used as f32 / total as f32;
+                metric(
+                    &mut c[0],
+                    s,
+                    "GPU memory (VRAM)",
+                    f,
+                    &format!("{:.0}%", f * 100.0),
+                    &format!("{} / {}", bytes(used), bytes(total)),
+                    &[(&h.vram, C_VRAM)],
+                    100.0,
+                    C_VRAM,
+                );
             }
             _ => card(&mut c[0], s, "GPU memory (VRAM)", |ui| {
                 ui.label(mute(s, "Not available."));
@@ -109,8 +207,14 @@ pub fn general(ui: &mut Ui, s: &Settings, st: &State) {
         card(&mut c[1], s, "Disk", |ui| {
             if let Some(d) = primary_disk(&sn.disks) {
                 let used = d.total.saturating_sub(d.avail);
-                let f = if d.total > 0 { used as f32 / d.total as f32 } else { 0.0 };
-                ui.label(RichText::new(format!("{} used of {}", bytes(used), bytes(d.total))).strong());
+                let f = if d.total > 0 {
+                    used as f32 / d.total as f32
+                } else {
+                    0.0
+                };
+                ui.label(
+                    RichText::new(format!("{} used of {}", bytes(used), bytes(d.total))).strong(),
+                );
                 ui.label(mute(s, format!("{} · {} · {}", d.mount, d.kind, d.fs)));
                 bar(ui, s, f, C_DISK, 10.0);
             }
@@ -142,7 +246,10 @@ pub fn general(ui: &mut Ui, s: &Settings, st: &State) {
                         ui.label(RichText::new(&b.state).strong());
                         ui.label(mute(s, format!("Health {:.0}%", b.health)));
                         if let Some(m) = b.minutes {
-                            ui.label(mute(s, format!("Time left {}", duration((m * 60.0) as u64))));
+                            ui.label(mute(
+                                s,
+                                format!("Time left {}", duration((m * 60.0) as u64)),
+                            ));
                         }
                         if let Some(cy) = b.cycles {
                             ui.label(mute(s, format!("{cy} charge cycles")));
@@ -156,7 +263,13 @@ pub fn general(ui: &mut Ui, s: &Settings, st: &State) {
         });
         card(&mut c[1], s, "System", |ui| {
             ui.label(format!("Uptime  {}", duration(sn.uptime)));
-            ui.label(mute(s, format!("Load average  {:.2}  {:.2}  {:.2}", sn.load.0, sn.load.1, sn.load.2)));
+            ui.label(mute(
+                s,
+                format!(
+                    "Load average  {:.2}  {:.2}  {:.2}",
+                    sn.load.0, sn.load.1, sn.load.2
+                ),
+            ));
             for (n, t) in sn.temps.iter().take(4) {
                 ui.label(mute(s, format!("{n}: {t:.0}°C")));
             }
@@ -172,7 +285,14 @@ pub fn general(ui: &mut Ui, s: &Settings, st: &State) {
                     let p = ui.painter_at(rect);
                     p.rect_filled(rect, Rounding::same(4.0), s.pal().panel2);
                     let fh = rect.height() * (c / 100.0).clamp(0.0, 1.0);
-                    p.rect_filled(Rect::from_min_max(pos2(rect.left(), rect.bottom() - fh), rect.right_bottom()), Rounding::same(4.0), s.accent());
+                    p.rect_filled(
+                        Rect::from_min_max(
+                            pos2(rect.left(), rect.bottom() - fh),
+                            rect.right_bottom(),
+                        ),
+                        Rounding::same(4.0),
+                        s.accent(),
+                    );
                     resp.on_hover_text(format!("Thread {i}: {c:.0}%"));
                     ui.label(RichText::new(format!("{i}")).small().color(s.pal().mute));
                 });
@@ -197,14 +317,19 @@ pub struct AppsUi {
     pub sort: SortKey,
     pub desc: bool,
     pub filter: String,
+    pub icons: HashMap<PathBuf, Option<egui::TextureHandle>>,
 }
 
 impl Default for AppsUi {
     fn default() -> Self {
-        Self { sort: SortKey::Cpu, desc: true, filter: String::new() }
+        Self {
+            sort: SortKey::Cpu,
+            desc: true,
+            filter: String::new(),
+            icons: HashMap::new(),
+        }
     }
 }
-
 
 /// Case-insensitive substring test without allocating (used for the app filter).
 fn contains_ci(hay: &str, needle: &str) -> bool {
@@ -217,12 +342,25 @@ fn contains_ci(hay: &str, needle: &str) -> bool {
 
 /// Case-insensitive name ordering without allocating per comparison.
 fn cmp_name_ci(a: &str, b: &str) -> Ordering {
-    a.bytes().map(|c| c.to_ascii_lowercase()).cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
+    a.bytes()
+        .map(|c| c.to_ascii_lowercase())
+        .cmp(b.bytes().map(|c| c.to_ascii_lowercase()))
 }
 
 fn sort_header(ui: &mut Ui, state: &mut AppsUi, k: SortKey, label: &str) {
-    let arrow = if state.sort == k { if state.desc { " ▼" } else { " ▲" } } else { "" };
-    if ui.selectable_label(state.sort == k, format!("{label}{arrow}")).clicked() {
+    let arrow = if state.sort == k {
+        if state.desc {
+            " ▼"
+        } else {
+            " ▲"
+        }
+    } else {
+        ""
+    };
+    if ui
+        .selectable_label(state.sort == k, format!("{label}{arrow}"))
+        .clicked()
+    {
         if state.sort == k {
             state.desc = !state.desc;
         } else {
@@ -239,12 +377,24 @@ fn f32cmp(a: f32, b: f32) -> Ordering {
 pub fn apps(ui: &mut Ui, s: &Settings, st: &State, ui_state: &mut AppsUi) {
     ui.horizontal(|ui| {
         ui.label("🔍");
-        ui.add(egui::TextEdit::singleline(&mut ui_state.filter).hint_text("Filter applications…").desired_width(260.0));
-        ui.label(mute(s, "Processes with the same name are grouped into one application."));
+        ui.add(
+            egui::TextEdit::singleline(&mut ui_state.filter)
+                .hint_text("Filter applications…")
+                .desired_width(260.0),
+        );
+        ui.label(mute(
+            s,
+            "Processes with the same name are grouped into one application.",
+        ));
     });
     ui.add_space(6.0);
 
-    let mut rows: Vec<&AppRow> = st.snap.apps.iter().filter(|a| contains_ci(&a.name, &ui_state.filter)).collect();
+    let mut rows: Vec<&AppRow> = st
+        .snap
+        .apps
+        .iter()
+        .filter(|a| contains_ci(&a.name, &ui_state.filter))
+        .collect();
     let (key, desc) = (ui_state.sort, ui_state.desc);
     rows.sort_by(|a, b| {
         let o = match key {
@@ -252,10 +402,20 @@ pub fn apps(ui: &mut Ui, s: &Settings, st: &State, ui_state: &mut AppsUi) {
             SortKey::Cpu => f32cmp(a.cpu, b.cpu),
             SortKey::Mem => a.mem.cmp(&b.mem),
             SortKey::Gpu => f32cmp(a.gpu.unwrap_or(0.0), b.gpu.unwrap_or(0.0)),
-            SortKey::Net => a.net.unwrap_or(0.0).partial_cmp(&b.net.unwrap_or(0.0)).unwrap_or(Ordering::Equal),
-            SortKey::Disk => (a.disk_read + a.disk_write).partial_cmp(&(b.disk_read + b.disk_write)).unwrap_or(Ordering::Equal),
+            SortKey::Net => a
+                .net
+                .unwrap_or(0.0)
+                .partial_cmp(&b.net.unwrap_or(0.0))
+                .unwrap_or(Ordering::Equal),
+            SortKey::Disk => (a.disk_read + a.disk_write)
+                .partial_cmp(&(b.disk_read + b.disk_write))
+                .unwrap_or(Ordering::Equal),
         };
-        if desc { o.reverse() } else { o }
+        if desc {
+            o.reverse()
+        } else {
+            o
+        }
     });
 
     let total_mem = st.snap.mem_total.max(1) as f32;
@@ -272,7 +432,30 @@ pub fn apps(ui: &mut Ui, s: &Settings, st: &State, ui_state: &mut AppsUi) {
             ui.end_row();
 
             for a in rows.iter().take(400) {
-                ui.label(RichText::new(&a.name).strong());
+                ui.horizontal(|ui| {
+                let mut shown_icon = false;
+                    if let Some(path) = &a.icon_path {
+                        let icon = ui_state.icons.entry(path.clone()).or_insert_with(|| {
+                            let bytes = std::fs::read(path).ok()?;
+                            let decoded = image::load_from_memory(&bytes).ok()?.thumbnail(28, 28).to_rgba8();
+                            let size = [decoded.width() as usize, decoded.height() as usize];
+                            Some(ui.ctx().load_texture(
+                                format!("process-icon:{}", path.display()),
+                                egui::ColorImage::from_rgba_unmultiplied(size, decoded.as_raw()),
+                                Default::default(),
+                            ))
+                        });
+                        if let Some(icon) = icon {
+                            ui.image((icon.id(), vec2(20.0, 20.0)));
+                            shown_icon = true;
+                        }
+                    }
+                    if !shown_icon {
+                        let initial = a.name.chars().next().unwrap_or('?').to_ascii_uppercase().to_string();
+                        ui.label(RichText::new(initial).strong().color(s.accent()));
+                    }
+                    ui.label(RichText::new(&a.name).strong());
+                });
                 ui.label(mute(s, a.procs.to_string()));
                 ui.label(RichText::new(format!("{:.1}%", a.cpu)).color(usage_color(a.cpu / 100.0 * 2.0, s.accent())));
                 ui.label(RichText::new(bytes(a.mem)).color(usage_color(a.mem as f32 / total_mem * 3.0, s.accent())));
@@ -303,7 +486,12 @@ pub struct DisksUi {
 
 impl Default for DisksUi {
     fn default() -> Self {
-        Self { list: None, sel: 0, health: Arc::new(Mutex::new(HashMap::new())), msg: String::new() }
+        Self {
+            list: None,
+            sel: 0,
+            health: Arc::new(Mutex::new(HashMap::new())),
+            msg: String::new(),
+        }
     }
 }
 
@@ -336,7 +524,13 @@ pub fn disks_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut DisksUi) {
     u.sel = u.sel.min(list.len() - 1);
     ui.horizontal_wrapped(|ui| {
         for (i, d) in list.iter().enumerate() {
-            if ui.selectable_label(u.sel == i, format!("{} · {} · {}", d.dev, d.kind, bytes(d.size))).clicked() {
+            if ui
+                .selectable_label(
+                    u.sel == i,
+                    format!("{} · {} · {}", d.dev, d.kind, bytes(d.size)),
+                )
+                .clicked()
+            {
                 u.sel = i;
             }
         }
@@ -344,37 +538,86 @@ pub fn disks_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut DisksUi) {
     ui.add_space(6.0);
     let d = &list[u.sel];
 
-    card(ui, s, &format!("{} — partition layout {}", d.model, if d.table.is_empty() { String::new() } else { format!("({})", d.table) }), |ui| {
-        let parts: Vec<(f32, Color32)> = d.parts.iter().enumerate().map(|(i, p)| (p.size as f32 / d.size.max(1) as f32, PALETTE[i % PALETTE.len()])).collect();
-        stacked(ui, s, &parts, 34.0);
-        ui.add_space(8.0);
-        egui::Grid::new("parts").striped(true).num_columns(6).spacing([18.0, 6.0]).show(ui, |ui| {
-            for h in ["", "Partition", "Filesystem", "Mount", "Size", "Used"] {
-                ui.label(mute(s, h));
+    card(
+        ui,
+        s,
+        &format!(
+            "{} — partition layout {}",
+            d.model,
+            if d.table.is_empty() {
+                String::new()
+            } else {
+                format!("({})", d.table)
             }
-            ui.end_row();
-            for (i, p) in d.parts.iter().enumerate() {
-                ui.colored_label(PALETTE[i % PALETTE.len()], "■");
-                ui.label(&p.name);
-                ui.label(mute(s, if p.fstype.is_empty() { "—" } else { p.fstype.as_str() }));
-                ui.label(mute(s, if p.mount.is_empty() { "—" } else { p.mount.as_str() }));
-                ui.label(bytes(p.size));
-                match p.used {
-                    Some(used) => {
-                        ui.vertical(|ui| {
-                            ui.set_width(160.0);
-                            bar(ui, s, used as f32 / p.size.max(1) as f32, s.accent(), 8.0);
-                            ui.label(RichText::new(format!("{} ({:.0}%)", bytes(used), used as f32 / p.size.max(1) as f32 * 100.0)).small().color(s.pal().mute));
-                        });
+        ),
+        |ui| {
+            let parts: Vec<(f32, Color32)> = d
+                .parts
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    (
+                        p.size as f32 / d.size.max(1) as f32,
+                        PALETTE[i % PALETTE.len()],
+                    )
+                })
+                .collect();
+            stacked(ui, s, &parts, 34.0);
+            ui.add_space(8.0);
+            egui::Grid::new("parts")
+                .striped(true)
+                .num_columns(6)
+                .spacing([18.0, 6.0])
+                .show(ui, |ui| {
+                    for h in ["", "Partition", "Filesystem", "Mount", "Size", "Used"] {
+                        ui.label(mute(s, h));
                     }
-                    None => {
-                        ui.label(mute(s, "—"));
+                    ui.end_row();
+                    for (i, p) in d.parts.iter().enumerate() {
+                        ui.colored_label(PALETTE[i % PALETTE.len()], "■");
+                        ui.label(&p.name);
+                        ui.label(mute(
+                            s,
+                            if p.fstype.is_empty() {
+                                "—"
+                            } else {
+                                p.fstype.as_str()
+                            },
+                        ));
+                        ui.label(mute(
+                            s,
+                            if p.mount.is_empty() {
+                                "—"
+                            } else {
+                                p.mount.as_str()
+                            },
+                        ));
+                        ui.label(bytes(p.size));
+                        match p.used {
+                            Some(used) => {
+                                ui.vertical(|ui| {
+                                    ui.set_width(160.0);
+                                    bar(ui, s, used as f32 / p.size.max(1) as f32, s.accent(), 8.0);
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} ({:.0}%)",
+                                            bytes(used),
+                                            used as f32 / p.size.max(1) as f32 * 100.0
+                                        ))
+                                        .small()
+                                        .color(s.pal().mute),
+                                    );
+                                });
+                            }
+                            None => {
+                                ui.label(mute(s, "—"));
+                            }
+                        }
+                        ui.end_row();
                     }
-                }
-                ui.end_row();
-            }
-        });
-    });
+                });
+        },
+    );
     ui.add_space(8.0);
 
     card(ui, s, "Health (S.M.A.R.T.)", |ui| {
@@ -390,9 +633,11 @@ pub fn disks_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut DisksUi) {
         }
         match u.health.lock().unwrap().get(&key) {
             Some(txt) => {
-                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                    ui.label(RichText::new(txt).monospace().small());
-                });
+                egui::ScrollArea::vertical()
+                    .max_height(260.0)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(txt).monospace().small());
+                    });
             }
             None => {
                 ui.label(mute(s, "Press “Check health” to query the drive (needs smartmontools / admin rights on Linux & macOS)."));
@@ -404,9 +649,24 @@ pub fn disks_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut DisksUi) {
     card(ui, s, "Mounted volumes", |ui| {
         for v in &st.snap.disks {
             let used = v.total.saturating_sub(v.avail);
-            ui.label(format!("{}  ({}, {}{})", v.mount, v.fs, v.kind, if v.removable { ", removable" } else { "" }));
+            ui.label(format!(
+                "{}  ({}, {}{})",
+                v.mount,
+                v.fs,
+                v.kind,
+                if v.removable { ", removable" } else { "" }
+            ));
             bar(ui, s, used as f32 / v.total.max(1) as f32, s.accent(), 8.0);
-            ui.label(RichText::new(format!("{} used · {} free · {} total", bytes(used), bytes(v.avail), bytes(v.total))).small().color(s.pal().mute));
+            ui.label(
+                RichText::new(format!(
+                    "{} used · {} free · {} total",
+                    bytes(used),
+                    bytes(v.avail),
+                    bytes(v.total)
+                ))
+                .small()
+                .color(s.pal().mute),
+            );
             ui.add_space(4.0);
         }
     });
@@ -437,7 +697,9 @@ impl StorageUi {
 pub fn storage_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut StorageUi) {
     let ctx = ui.ctx().clone();
     if u.path.is_empty() {
-        u.path = primary_disk(&st.snap.disks).map(|d| d.mount.clone()).unwrap_or_else(|| "/".into());
+        u.path = primary_disk(&st.snap.disks)
+            .map(|d| d.mount.clone())
+            .unwrap_or_else(|| "/".into());
     }
     ui.horizontal_wrapped(|ui| {
         ui.selectable_value(&mut u.apps_view, false, "📁 Folders");
@@ -474,17 +736,21 @@ pub fn storage_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut StorageUi) {
                 }
                 Some(v) => {
                     let max = v[0].1.max(1) as f32;
-                    egui::Grid::new("app_sizes").striped(true).num_columns(3).spacing([16.0, 5.0]).show(ui, |ui| {
-                        for (name, size) in v.iter().take(200) {
-                            ui.label(name);
-                            ui.scope(|ui| {
-                                ui.set_width(240.0);
-                                bar(ui, s, *size as f32 / max, s.accent(), 8.0);
-                            });
-                            ui.label(bytes(*size));
-                            ui.end_row();
-                        }
-                    });
+                    egui::Grid::new("app_sizes")
+                        .striped(true)
+                        .num_columns(3)
+                        .spacing([16.0, 5.0])
+                        .show(ui, |ui| {
+                            for (name, size) in v.iter().take(200) {
+                                ui.label(name);
+                                ui.scope(|ui| {
+                                    ui.set_width(240.0);
+                                    bar(ui, s, *size as f32 / max, s.accent(), 8.0);
+                                });
+                                ui.label(bytes(*size));
+                                ui.end_row();
+                            }
+                        });
                 }
             }
         });
@@ -492,7 +758,10 @@ pub fn storage_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut StorageUi) {
     }
 
     ui.horizontal(|ui| {
-        if ui.add_enabled(u.stack.len() > 0, egui::Button::new("⬆ Up")).clicked() {
+        if ui
+            .add_enabled(u.stack.len() > 0, egui::Button::new("⬆ Up"))
+            .clicked()
+        {
             if let Some(prev) = u.stack.pop() {
                 u.scan(&ctx, prev);
             }
@@ -526,37 +795,54 @@ pub fn storage_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut StorageUi) {
     let sum: u64 = entries.iter().map(|e| e.size).sum();
     let mut drill: Option<PathBuf> = None;
 
-    card(ui, s, &format!("{} — {}", root.display(), bytes(sum)), |ui| {
-        if running {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(mute(s, format!("Scanning… {done} / {total} items")));
-            });
-        }
-        let parts: Vec<(f32, Color32)> = entries.iter().take(8).enumerate().map(|(i, e)| (e.size as f32 / sum.max(1) as f32, PALETTE[i])).collect();
-        stacked(ui, s, &parts, 26.0);
-        ui.add_space(8.0);
-        let max = entries.first().map(|e| e.size).unwrap_or(1).max(1) as f32;
-        egui::Grid::new("folder_sizes").striped(true).num_columns(4).spacing([16.0, 5.0]).show(ui, |ui| {
-            for (i, e) in entries.iter().take(300).enumerate() {
-                let col = PALETTE[i % PALETTE.len()];
-                if e.is_dir {
-                    if ui.link(format!("📁 {}", e.name)).clicked() {
-                        drill = Some(e.path.clone());
-                    }
-                } else {
-                    ui.label(format!("📄 {}", e.name));
-                }
-                ui.scope(|ui| {
-                    ui.set_width(240.0);
-                    bar(ui, s, e.size as f32 / max, col, 8.0);
+    card(
+        ui,
+        s,
+        &format!("{} — {}", root.display(), bytes(sum)),
+        |ui| {
+            if running {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(mute(s, format!("Scanning… {done} / {total} items")));
                 });
-                ui.label(bytes(e.size));
-                ui.label(mute(s, format!("{:.1}%", e.size as f32 / sum.max(1) as f32 * 100.0)));
-                ui.end_row();
             }
-        });
-    });
+            let parts: Vec<(f32, Color32)> = entries
+                .iter()
+                .take(8)
+                .enumerate()
+                .map(|(i, e)| (e.size as f32 / sum.max(1) as f32, PALETTE[i]))
+                .collect();
+            stacked(ui, s, &parts, 26.0);
+            ui.add_space(8.0);
+            let max = entries.first().map(|e| e.size).unwrap_or(1).max(1) as f32;
+            egui::Grid::new("folder_sizes")
+                .striped(true)
+                .num_columns(4)
+                .spacing([16.0, 5.0])
+                .show(ui, |ui| {
+                    for (i, e) in entries.iter().take(300).enumerate() {
+                        let col = PALETTE[i % PALETTE.len()];
+                        if e.is_dir {
+                            if ui.link(format!("📁 {}", e.name)).clicked() {
+                                drill = Some(e.path.clone());
+                            }
+                        } else {
+                            ui.label(format!("📄 {}", e.name));
+                        }
+                        ui.scope(|ui| {
+                            ui.set_width(240.0);
+                            bar(ui, s, e.size as f32 / max, col, 8.0);
+                        });
+                        ui.label(bytes(e.size));
+                        ui.label(mute(
+                            s,
+                            format!("{:.1}%", e.size as f32 / sum.max(1) as f32 * 100.0),
+                        ));
+                        ui.end_row();
+                    }
+                });
+        },
+    );
     if let Some(p) = drill {
         u.stack.push(root);
         u.scan(&ctx, p);
@@ -571,6 +857,34 @@ pub struct SpecsUi {
     pub sub: usize,
 }
 
+fn cpu_brand(name: &str) -> &'static str {
+    let name = name.to_ascii_lowercase();
+    if name.contains("intel") {
+        "Intel CPU"
+    } else if name.contains("amd") {
+        "AMD CPU"
+    } else if name.contains("apple") {
+        "Apple CPU"
+    } else {
+        "CPU"
+    }
+}
+
+fn gpu_brand(name: &str) -> String {
+    let name = name.to_ascii_lowercase();
+    if name.contains("nvidia") || name.contains("geforce") || name.contains("quadro") {
+        "NVIDIA GPU".into()
+    } else if name.contains("amd") || name.contains("radeon") {
+        "AMD GPU".into()
+    } else if name.contains("intel") {
+        "Intel GPU".into()
+    } else if name.contains("apple") {
+        "Apple GPU".into()
+    } else {
+        "GPU".into()
+    }
+}
+
 pub fn specs_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut SpecsUi) {
     let data = u.data.get_or_insert_with(specs::collect).clone();
     let names = ["CPU", "Mainboard", "Memory", "GPU", "System"];
@@ -580,11 +894,51 @@ pub fn specs_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut SpecsUi) {
         }
     });
     ui.add_space(6.0);
+    if u.sub == 0 || u.sub == 3 || u.sub == 4 {
+        card(ui, s, "Detected hardware logos", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                if u.sub == 0 {
+                    let cpu = data
+                        .cpu
+                        .first()
+                        .map(|(_, name)| name.as_str())
+                        .unwrap_or("CPU");
+                    ui.label(RichText::new(cpu_brand(cpu)).strong().color(C_CPU));
+                }
+                if u.sub == 3 {
+                    if st.snap.gpus.is_empty() {
+                        ui.label(mute(s, "GPU not detected"));
+                    }
+                    for gpu in &st.snap.gpus {
+                        ui.label(RichText::new(gpu_brand(&gpu.name)).strong().color(C_GPU))
+                            .on_hover_text(&gpu.name);
+                    }
+                }
+                if u.sub == 4 {
+                    let (logo, name) = match std::env::consts::OS {
+                        "linux" => ("LNX", "Linux"),
+                        "windows" => ("⊞", "Windows"),
+                        "macos" => ("APL", "macOS"),
+                        other => ("OS", other),
+                    };
+                    ui.label(
+                        RichText::new(format!("{logo} {name}"))
+                            .strong()
+                            .color(s.accent()),
+                    );
+                }
+            });
+        });
+        ui.add_space(8.0);
+    }
 
     let rows: Vec<(String, String)> = match u.sub {
         0 => {
             let mut r = data.cpu.clone();
-            r.push(("Current clock (avg)".into(), format!("{} MHz", st.snap.freq_mhz)));
+            r.push((
+                "Current clock (avg)".into(),
+                format!("{} MHz", st.snap.freq_mhz),
+            ));
             r.push(("Current load".into(), format!("{:.1}%", st.snap.cpu)));
             r
         }
@@ -595,31 +949,52 @@ pub fn specs_tab(ui: &mut Ui, s: &Settings, st: &State, u: &mut SpecsUi) {
             r.push(("Swap in use".into(), bytes(st.snap.swap_used)));
             r
         }
-        3 => match &st.snap.gpu {
-            Some(g) => {
-                let mut r = vec![("Name".to_string(), g.name.clone()), ("Driver".into(), g.driver.clone()), ("VRAM".into(), bytes(g.vram_total))];
+        3 => {
+            let mut rows = Vec::new();
+            for (i, g) in st.snap.gpus.iter().enumerate() {
+                let prefix = format!("GPU {}", i + 1);
+                rows.push((format!("{prefix} name"), g.name.clone()));
+                rows.push((format!("{prefix} driver"), g.driver.clone()));
+                rows.push((format!("{prefix} utilization"), format!("{:.0}%", g.util)));
+                if g.vram_total > 0 {
+                    rows.push((
+                        format!("{prefix} VRAM"),
+                        format!("{} / {}", bytes(g.vram_used), bytes(g.vram_total)),
+                    ));
+                }
                 if let Some(t) = g.temp {
-                    r.push(("Temperature".into(), format!("{t:.0} °C")));
+                    rows.push((format!("{prefix} temperature"), format!("{t:.0} °C")));
                 }
                 if let Some(w) = g.power_w {
-                    r.push(("Power draw".into(), format!("{w:.0} W")));
+                    rows.push((format!("{prefix} power draw"), format!("{w:.0} W")));
                 }
-                r
             }
-            None => vec![("GPU".into(), "No telemetry source available".into())],
-        },
+            if rows.is_empty() {
+                rows.push(("GPU".into(), "No display adapter detected".into()));
+            }
+            rows
+        }
         _ => data.system.clone(),
     };
 
-    card(ui, s, &format!("{} information", names[u.sub.min(4)]), |ui| {
-        egui::Grid::new("specs_grid").striped(true).num_columns(2).spacing([30.0, 7.0]).show(ui, |ui| {
-            for (k, v) in &rows {
-                ui.label(mute(s, k));
-                ui.label(RichText::new(v).strong());
-                ui.end_row();
-            }
-        });
-    });
+    card(
+        ui,
+        s,
+        &format!("{} information", names[u.sub.min(4)]),
+        |ui| {
+            egui::Grid::new("specs_grid")
+                .striped(true)
+                .num_columns(2)
+                .spacing([30.0, 7.0])
+                .show(ui, |ui| {
+                    for (k, v) in &rows {
+                        ui.label(mute(s, k));
+                        ui.label(RichText::new(v).strong());
+                        ui.end_row();
+                    }
+                });
+        },
+    );
     if u.sub == 0 {
         ui.add_space(8.0);
         card(ui, s, "Sensors", |ui| {
@@ -658,23 +1033,39 @@ pub fn startup_tab(ui: &mut Ui, s: &Settings, u: &mut StartupUi) {
     let items = u.items.clone().unwrap_or_default();
     let enabled = items.iter().filter(|i| i.enabled).count();
 
-    card(ui, s, &format!("Startup applications — {enabled} of {} enabled", items.len()), |ui| {
-        if items.is_empty() {
-            ui.label(mute(s, "No startup entries found."));
-        }
-        egui::Grid::new("startup").striped(true).num_columns(4).spacing([18.0, 8.0]).show(ui, |ui| {
-            for (i, it) in items.iter().enumerate() {
-                ui.label(RichText::new(&it.name).strong());
-                ui.label(mute(s, it.command.as_str())).on_hover_text(it.command.clone());
-                ui.label(mute(s, &it.location));
-                let mut on = it.enabled;
-                if ui.add_enabled(it.can_toggle, egui::Checkbox::new(&mut on, "Enabled")).changed() {
-                    toggled = Some((i, on));
-                }
-                ui.end_row();
+    card(
+        ui,
+        s,
+        &format!(
+            "Startup applications — {enabled} of {} enabled",
+            items.len()
+        ),
+        |ui| {
+            if items.is_empty() {
+                ui.label(mute(s, "No startup entries found."));
             }
-        });
-    });
+            egui::Grid::new("startup")
+                .striped(true)
+                .num_columns(4)
+                .spacing([18.0, 8.0])
+                .show(ui, |ui| {
+                    for (i, it) in items.iter().enumerate() {
+                        ui.label(RichText::new(&it.name).strong());
+                        ui.label(mute(s, it.command.as_str()))
+                            .on_hover_text(it.command.clone());
+                        ui.label(mute(s, &it.location));
+                        let mut on = it.enabled;
+                        if ui
+                            .add_enabled(it.can_toggle, egui::Checkbox::new(&mut on, "Enabled"))
+                            .changed()
+                        {
+                            toggled = Some((i, on));
+                        }
+                        ui.end_row();
+                    }
+                });
+        },
+    );
     if let Some((i, on)) = toggled {
         match startup::set_enabled(&items[i], on) {
             Ok(()) => {

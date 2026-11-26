@@ -1,4 +1,4 @@
-name: build-native
+name: build-mpsm
 
 on:
   push:
@@ -12,7 +12,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - os: ubuntu-22.04
+            target: linux
+          - os: windows-latest
+            target: windows
+          - os: macos-latest
+            target: macos
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +42,55 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: ferrum-monitor-${{ matrix.os }}
+          name: mpsm-${{ matrix.target }}
           path: |
-            rust-app/target/release/ferrum-monitor
-            rust-app/target/release/ferrum-monitor.exe
+            rust-app/target/release/mpsm
+            rust-app/target/release/mpsm.exe
+          if-no-files-found: error
+
+  linux-appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux GUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libxkbcommon-dev libwayland-dev libx11-dev libgl1-mesa-dev librsvg2-bin
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build release binary
+        run: cargo build --release --manifest-path rust-app/Cargo.toml
+      - name: Package portable Linux bundle
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp rust-app/target/release/mpsm AppDir/usr/bin/mpsm
+          rsvg-convert -w 256 -h 256 assets/mpsm.svg > AppDir/mpsm.png
+          cat > AppDir/AppRun <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/mpsm" "$@"
+          EOF
+          chmod +x AppDir/AppRun
+          cp AppDir/AppRun AppDir/mpsm
+          cat > AppDir/mpsm.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=MPSM
+          Comment=Multipurpose System Manager
+          Exec=mpsm
+          Icon=mpsm
+          Terminal=false
+          Categories=System;Monitor;
+          EOF
+          curl -L --fail -o linuxdeploy.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy.AppImage --appdir AppDir --executable AppDir/usr/bin/mpsm --desktop-file AppDir/mpsm.desktop --icon-file AppDir/mpsm.png
+          curl -L --fail -o appimagetool.AppImage https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 ./appimagetool.AppImage AppDir mpsm-x86_64.AppImage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpsm-linux-appimage
+          path: mpsm-x86_64.AppImage
           if-no-files-found: error
