@@ -145,22 +145,7 @@ impl Settings {
         w.open.rounding = r;
         ctx.set_visuals(v);
 
-        // Fonts. egui ships a partial emoji font; these open-licensed fallbacks make
-        // every icon in the UI (and ▼/▲/■ symbols) render on all platforms.
         let mut fonts = FontDefinitions::default();
-        fonts.font_data.insert(
-            "ferrum_symbols".to_owned(),
-            FontData::from_static(include_bytes!("../assets/DejaVuSans.ttf")),
-        );
-        fonts.font_data.insert(
-            "ferrum_emoji".to_owned(),
-            FontData::from_static(include_bytes!("../assets/NotoEmoji-Regular.ttf")),
-        );
-        for family in [FontFamily::Proportional, FontFamily::Monospace] {
-            let list = fonts.families.entry(family).or_default();
-            list.push("ferrum_symbols".to_owned());
-            list.push("ferrum_emoji".to_owned());
-        }
         let mut family = FontFamily::Proportional;
         match self.font {
             FontChoice::System => {}
