@@ -1,0 +1,43 @@
+name: build-native
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libgl1-mesa-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust-app
+
+      - name: Build release binary
+        run: cargo build --release --manifest-path rust-app/Cargo.toml
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ferrum-monitor-${{ matrix.os }}
+          path: |
+            rust-app/target/release/ferrum-monitor
+            rust-app/target/release/ferrum-monitor.exe
+          if-no-files-found: error
