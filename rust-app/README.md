@@ -67,7 +67,7 @@ cargo run --release --example ui_bench   # headless egui rendering cost
 | Step | Result |
 | --- | --- |
 | `cargo check` | success — 0 errors, 0 warnings |
-| `cargo build --release` | success — stripped binary ≈ 9.8 MB (includes 2.7 MB of bundled fallback fonts) |
+| `cargo build --release` | success — stripped binary ≈ 7.2 MB |
 | GUI smoke test under Xvfb (X11 + Mesa) | all 7 tabs opened, real folder scan completed, no panics |
 | Sampling benchmark | min 1.2 ms · median ≈1.8 ms · max 2.3–3.6 ms per pass |
 | UI benchmark | General 0.079 ms · Applications 0.355 ms median/frame |
@@ -75,7 +75,7 @@ cargo run --release --example ui_bench   # headless egui rendering cost
 
 These numbers are from a container (no GPU compositing), so treat them as a lower bound.
 The interface was launched under a virtual X display (Xvfb + Mesa) and every tab was captured.
-Some icons needed extra font fallbacks, which now ship inside the binary (`assets/`, open licences).
+The UI uses egui's built-in fonts, with an optional user-selected custom font.
 
 ## 3. Platform notes & permissions
 
