@@ -3,43 +3,52 @@
 //!   cargo run --release --example ui_bench
 //! It runs egui's layout + tessellation without a GPU, 120 frames per tab.
 
-#[path = "../src/util.rs"]
-mod util;
+#[path = "../src/disks.rs"]
+mod disks;
 #[path = "../src/gpu.rs"]
 mod gpu;
+#[path = "../src/icons.rs"]
+mod icons;
 #[path = "../src/sampler.rs"]
 mod sampler;
 #[path = "../src/settings.rs"]
 mod settings;
-#[path = "../src/widgets.rs"]
-mod widgets;
-#[path = "../src/disks.rs"]
-mod disks;
-#[path = "../src/storage.rs"]
-mod storage;
 #[path = "../src/specs.rs"]
 mod specs;
 #[path = "../src/startup.rs"]
 mod startup;
+#[path = "../src/storage.rs"]
+mod storage;
 #[path = "../src/tabs.rs"]
 mod tabs;
+#[path = "../src/util.rs"]
+mod util;
+#[path = "../src/widgets.rs"]
+mod widgets;
 
 use eframe::egui::{self, vec2, Pos2, Rect};
 use std::collections::VecDeque;
 use std::time::Instant;
 
 fn hist(v: f32) -> VecDeque<f32> {
-    (0..sampler::HIST).map(|i| (v + (i as f32 * 0.4).sin() * 8.0).clamp(0.0, 100.0)).collect()
+    (0..sampler::HIST)
+        .map(|i| (v + (i as f32 * 0.4).sin() * 8.0).clamp(0.0, 100.0))
+        .collect()
 }
 
 fn state() -> sampler::State {
     let apps: Vec<sampler::AppRow> = (0..60)
         .map(|i| sampler::AppRow {
             name: format!("application-{i:02}"),
+            icon_path: None,
             procs: 1 + i % 4,
             cpu: (i as f32 * 1.7) % 40.0,
             mem: 40_000_000 + (i as u64) * 31_000_000,
-            gpu: if i % 3 == 0 { Some((i % 30) as f32) } else { None },
+            gpu: if i % 3 == 0 {
+                Some((i % 30) as f32)
+            } else {
+                None
+            },
             net: None,
             disk_read: (i as f64) * 1024.0,
             disk_write: (i as f64) * 512.0,
@@ -62,7 +71,7 @@ fn state() -> sampler::State {
         mem_total: 32_000_000_000,
         swap_used: 0,
         swap_total: 0,
-        gpu: Some(gpu::GpuInfo {
+        gpus: vec![gpu::GpuInfo {
             name: "Benchmark GPU".into(),
             util: 30.0,
             vram_used: 5_000_000_000,
@@ -70,7 +79,7 @@ fn state() -> sampler::State {
             temp: Some(61.0),
             power_w: Some(190.0),
             driver: "000.00".into(),
-        }),
+        }],
         disks: vec![sampler::DiskRow {
             name: "nvme0n1".into(),
             mount: "/".into(),
@@ -90,7 +99,13 @@ fn state() -> sampler::State {
         temps: vec![("CPU package".into(), 61.0)],
         load: (0.8, 1.1, 0.9),
     };
-    sampler::State { snap, hist: h, ready: true, seq: 1, sample_us: 1500 }
+    sampler::State {
+        snap,
+        hist: h,
+        ready: true,
+        seq: 1,
+        sample_us: 1500,
+    }
 }
 
 fn main() {
@@ -115,9 +130,11 @@ fn main() {
             input.time = Some(frame as f64 / 60.0);
             let t = Instant::now();
             let _ = ctx.run(input.clone(), |ctx| {
-                egui::SidePanel::left("nav").exact_width(210.0).show(ctx, |ui| {
-                    ui.label("Ferrum Monitor");
-                });
+                egui::SidePanel::left("nav")
+                    .exact_width(210.0)
+                    .show(ctx, |ui| {
+                        ui.label("MPSM");
+                    });
                 egui::CentralPanel::default().show(ctx, |ui| draw(ui));
             });
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
@@ -129,9 +146,24 @@ fn main() {
     };
 
     run("general", Box::new(|ui| tabs::general(ui, &s, &st)));
-    run("applications", Box::new(|ui| tabs::apps(ui, &s, &st, &mut apps_ui)));
-    run("disks", Box::new(|ui| tabs::disks_tab(ui, &s, &st, &mut disks_ui)));
-    run("storage", Box::new(|ui| tabs::storage_tab(ui, &s, &st, &mut storage_ui)));
-    run("specs", Box::new(|ui| tabs::specs_tab(ui, &s, &st, &mut specs_ui)));
-    run("startup", Box::new(|ui| tabs::startup_tab(ui, &s, &mut startup_ui)));
+    run(
+        "applications",
+        Box::new(|ui| tabs::apps(ui, &s, &st, &mut apps_ui)),
+    );
+    run(
+        "disks",
+        Box::new(|ui| tabs::disks_tab(ui, &s, &st, &mut disks_ui)),
+    );
+    run(
+        "storage",
+        Box::new(|ui| tabs::storage_tab(ui, &s, &st, &mut storage_ui)),
+    );
+    run(
+        "specs",
+        Box::new(|ui| tabs::specs_tab(ui, &s, &st, &mut specs_ui)),
+    );
+    run(
+        "startup",
+        Box::new(|ui| tabs::startup_tab(ui, &s, &mut startup_ui)),
+    );
 }

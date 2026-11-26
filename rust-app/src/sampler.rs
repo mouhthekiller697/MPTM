@@ -26,6 +26,7 @@ pub const HIST: usize = 90;
 #[derive(Clone, Default)]
 pub struct AppRow {
     pub name: String,
+    pub icon_path: Option<std::path::PathBuf>,
     pub procs: usize,
     pub cpu: f32,
     pub mem: u64,
@@ -68,7 +69,7 @@ pub struct Snapshot {
     pub swap_used: u64,
     #[allow(dead_code)]
     pub swap_total: u64,
-    pub gpu: Option<GpuInfo>,
+    pub gpus: Vec<GpuInfo>,
     pub disks: Vec<DiskRow>,
     pub disk_read_bps: f64,
     pub disk_write_bps: f64,
@@ -120,6 +121,7 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
         .name("sampler".into())
         .spawn(move || {
             let mut sys = System::new_all();
+            let desktop_icons = crate::icons::DesktopIcons::discover();
             let mut disks = Disks::new_with_refreshed_list();
             let mut comps = Components::new_with_refreshed_list();
             let mut networks = Networks::new_with_refreshed_list();
@@ -128,10 +130,11 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
             let mut last_net: Option<(u64, u64)> = None;
             // pid -> (cumulative read, cumulative written) from the previous sample
             let mut last_disk: HashMap<Pid, (u64, u64)> = HashMap::new();
-            let mut next_disk: HashMap<Pid, (u64, u64)> = HashMap::with_capacity(last_disk.capacity());
+            let mut next_disk: HashMap<Pid, (u64, u64)> =
+                HashMap::with_capacity(last_disk.capacity());
             let mut last = Instant::now();
             let mut tick: u64 = 0;
-            let mut gpu_info: Option<GpuInfo> = None;
+            let mut gpu_info: Vec<GpuInfo> = Vec::new();
             let mut gpu_procs: HashMap<u32, f32> = HashMap::new();
             let mut disk_rows: Vec<DiskRow> = Vec::new();
             let mut temps: Vec<(String, f32)> = Vec::new();
@@ -172,7 +175,12 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                         removable: d.is_removable(),
                     }));
                     temps.clear();
-                    temps.extend(comps.iter().filter(|c| c.temperature().is_finite()).map(|c| (c.label().to_string(), c.temperature())));
+                    temps.extend(
+                        comps
+                            .iter()
+                            .filter(|c| c.temperature().is_finite())
+                            .map(|c| (c.label().to_string(), c.temperature())),
+                    );
                     if tick % 10 == 0 {
                         let la = System::load_average();
                         load = (la.one, la.five, la.fifteen);
@@ -184,7 +192,7 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                 }
                 if tick % 2 == 0 {
                     gpu_info = gpu::info();
-                    if gpu_info.is_none() {
+                    if gpu_info.is_empty() {
                         gpu_procs.clear();
                     }
                     // `nvidia-smi pmon` is an extra process spawn: 5× cheaper cadence.
@@ -213,6 +221,9 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                     e.procs += 1;
                     e.cpu += p.cpu_usage();
                     e.mem += p.memory();
+                    if e.icon_path.is_none() {
+                        e.icon_path = desktop_icons.for_process(name);
+                    }
                     e.disk_read += dr as f64 / dt;
                     e.disk_write += dw as f64 / dt;
                     if let Some(g) = gpu_procs.get(&pid.as_u32()) {
@@ -228,7 +239,11 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                     row.cpu /= ncpu;
                     apps.push(row);
                 }
-                apps.sort_unstable_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal));
+                apps.sort_unstable_by(|a, b| {
+                    b.cpu
+                        .partial_cmp(&a.cpu)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
 
                 // ── network (cumulative counters -> rate) ─────────────────────
                 if tick % 30 == 0 && tick > 0 {
@@ -236,15 +251,24 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                 } else {
                     networks.refresh();
                 }
-                let (rx, tx) = networks.iter().fold((0u64, 0u64), |a, (_, n)| (a.0 + n.total_received(), a.1 + n.total_transmitted()));
+                let (rx, tx) = networks.iter().fold((0u64, 0u64), |a, (_, n)| {
+                    (a.0 + n.total_received(), a.1 + n.total_transmitted())
+                });
                 let (rx_bps, tx_bps) = match last_net {
-                    Some((prx, ptx)) => (rx.saturating_sub(prx) as f64 / dt, tx.saturating_sub(ptx) as f64 / dt),
+                    Some((prx, ptx)) => (
+                        rx.saturating_sub(prx) as f64 / dt,
+                        tx.saturating_sub(ptx) as f64 / dt,
+                    ),
                     None => (0.0, 0.0),
                 };
                 last_net = Some((rx, tx));
 
                 let cpus = sys.cpus();
-                let freq = if cpus.is_empty() { 0 } else { cpus.iter().map(|c| c.frequency()).sum::<u64>() / cpus.len() as u64 };
+                let freq = if cpus.is_empty() {
+                    0
+                } else {
+                    cpus.iter().map(|c| c.frequency()).sum::<u64>() / cpus.len() as u64
+                };
                 let snap = Snapshot {
                     cpu: sys.global_cpu_usage(),
                     cores: cpus.iter().map(|c| c.cpu_usage()).collect(),
@@ -253,7 +277,7 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                     mem_total: sys.total_memory(),
                     swap_used: sys.used_swap(),
                     swap_total: sys.total_swap(),
-                    gpu: gpu_info.clone(),
+                    gpus: gpu_info.clone(),
                     disks: disk_rows.clone(),
                     disk_read_bps: rd_total as f64 / dt,
                     disk_write_bps: wr_total as f64 / dt,
@@ -270,10 +294,30 @@ pub fn spawn(ctx: egui::Context, refresh_ms: Arc<AtomicU64>) -> Arc<Mutex<State>
                 {
                     let mut st = out.lock().unwrap();
                     push(&mut st.hist.cpu, snap.cpu);
-                    push(&mut st.hist.ram, if snap.mem_total > 0 { snap.mem_used as f32 / snap.mem_total as f32 * 100.0 } else { 0.0 });
-                    if let Some(g) = &snap.gpu {
-                        push(&mut st.hist.gpu, g.util);
-                        push(&mut st.hist.vram, if g.vram_total > 0 { g.vram_used as f32 / g.vram_total as f32 * 100.0 } else { 0.0 });
+                    push(
+                        &mut st.hist.ram,
+                        if snap.mem_total > 0 {
+                            snap.mem_used as f32 / snap.mem_total as f32 * 100.0
+                        } else {
+                            0.0
+                        },
+                    );
+                    if !snap.gpus.is_empty() {
+                        let count = snap.gpus.len() as f32;
+                        push(
+                            &mut st.hist.gpu,
+                            snap.gpus.iter().map(|g| g.util).sum::<f32>() / count,
+                        );
+                        let total = snap.gpus.iter().map(|g| g.vram_total).sum::<u64>();
+                        let used = snap.gpus.iter().map(|g| g.vram_used).sum::<u64>();
+                        push(
+                            &mut st.hist.vram,
+                            if total > 0 {
+                                used as f32 / total as f32 * 100.0
+                            } else {
+                                0.0
+                            },
+                        );
                     }
                     push(&mut st.hist.disk_r, snap.disk_read_bps as f32);
                     push(&mut st.hist.disk_w, snap.disk_write_bps as f32);
@@ -307,7 +351,10 @@ fn read_battery(mgr: &Option<battery::Manager>) -> Option<BatteryInfo> {
         pct: b.state_of_charge().get::<percent>(),
         state: format!("{:?}", b.state()),
         health: b.state_of_health().get::<percent>(),
-        minutes: b.time_to_empty().or_else(|| b.time_to_full()).map(|t| t.get::<minute>()),
+        minutes: b
+            .time_to_empty()
+            .or_else(|| b.time_to_full())
+            .map(|t| t.get::<minute>()),
         cycles: b.cycle_count(),
     })
 }

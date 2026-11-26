@@ -1,8 +1,8 @@
 [package]
-name = "ferrum-monitor"
+name = "mpsm"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-platform (Linux / macOS / Windows) task manager, disk manager, storage analyser, spec viewer and startup manager written in Rust"
+description = "MPSM (Multipurpose System Manager), a cross-platform system monitor and manager written in Rust"
 license = "MIT"
 
 [dependencies]
@@ -11,6 +11,9 @@ sysinfo = "0.32"
 battery = "0.7"
 walkdir = "2"
 serde = { version = "1", features = ["derive"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 serde_json = "1"
 
 [profile.release]

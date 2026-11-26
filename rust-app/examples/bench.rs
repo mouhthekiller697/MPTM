@@ -3,12 +3,14 @@
 //!   cargo run --release --example bench
 //! Prints how long one sampling pass takes, excluding the configured sleep.
 
-#[path = "../src/util.rs"]
-mod util;
 #[path = "../src/gpu.rs"]
 mod gpu;
+#[path = "../src/icons.rs"]
+mod icons;
 #[path = "../src/sampler.rs"]
 mod sampler;
+#[path = "../src/util.rs"]
+mod util;
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -42,6 +44,9 @@ fn main() {
     println!("max:      {} µs", samples[samples.len() - 1]);
     println!("apps:     {}", st.snap.apps.len());
     println!("disks:    {}", st.snap.disks.len());
-    println!("gpu:      {:?}", st.snap.gpu.as_ref().map(|g| &g.name));
+    println!(
+        "gpus:     {:?}",
+        st.snap.gpus.iter().map(|g| &g.name).collect::<Vec<_>>()
+    );
     println!("battery:  {:?}", st.snap.battery.as_ref().map(|b| b.pct));
 }

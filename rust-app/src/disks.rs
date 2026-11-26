@@ -10,7 +10,12 @@ use crate::util::launch;
 #[cfg(windows)]
 use crate::util::powershell;
 #[cfg(not(windows))]
+use crate::util::program_available;
+#[cfg(not(windows))]
 use crate::util::run;
+#[cfg(target_os = "linux")]
+use crate::util::run_as_admin;
+#[cfg(target_os = "linux")]
 use serde_json::Value;
 use sysinfo::Disks;
 
@@ -33,12 +38,18 @@ pub struct PhysDisk {
     pub parts: Vec<Part>,
 }
 
+#[cfg(target_os = "linux")]
 fn num(v: &Value) -> u64 {
-    v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        .unwrap_or(0)
 }
+#[cfg(target_os = "linux")]
 fn truthy(v: &Value) -> bool {
-    v.as_bool().unwrap_or_else(|| v.as_u64() == Some(1) || v.as_str() == Some("1"))
+    v.as_bool()
+        .unwrap_or_else(|| v.as_u64() == Some(1) || v.as_str() == Some("1"))
 }
+#[cfg(target_os = "linux")]
 fn text(v: &Value) -> String {
     v.as_str().unwrap_or("").trim().to_string()
 }
@@ -55,11 +66,22 @@ pub fn list() -> Vec<PhysDisk> {
 
 #[cfg(target_os = "linux")]
 fn lsblk() -> Option<Vec<PhysDisk>> {
-    let out = run("lsblk", &["-J", "-b", "-o", "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,PTTYPE,ROTA,TRAN"])?;
+    let out = run(
+        "lsblk",
+        &[
+            "-J",
+            "-b",
+            "-o",
+            "NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,MODEL,PTTYPE,ROTA,TRAN",
+        ],
+    )?;
     let json: Value = serde_json::from_str(&out).ok()?;
     let mounted = Disks::new_with_refreshed_list();
     let used_of = |mount: &str| -> Option<u64> {
-        mounted.iter().find(|d| d.mount_point().to_string_lossy() == mount).map(|d| d.total_space().saturating_sub(d.available_space()))
+        mounted
+            .iter()
+            .find(|d| d.mount_point().to_string_lossy() == mount)
+            .map(|d| d.total_space().saturating_sub(d.available_space()))
     };
     let mut res = vec![];
     for d in json.get("blockdevices")?.as_array()? {
@@ -84,13 +106,23 @@ fn lsblk() -> Option<Vec<PhysDisk>> {
                     name: text(&c["name"]),
                     size: num(&c["size"]),
                     fstype: text(&c["fstype"]),
-                    used: if mount.is_empty() { None } else { used_of(&mount) },
+                    used: if mount.is_empty() {
+                        None
+                    } else {
+                        used_of(&mount)
+                    },
                     mount,
                 });
             }
         } else {
             let mount = text(&d["mountpoint"]);
-            parts.push(Part { name: text(&d["name"]), size: num(&d["size"]), fstype: text(&d["fstype"]), used: used_of(&mount), mount });
+            parts.push(Part {
+                name: text(&d["name"]),
+                size: num(&d["size"]),
+                fstype: text(&d["fstype"]),
+                used: used_of(&mount),
+                mount,
+            });
         }
         let model = {
             let m = text(&d["model"]);
@@ -99,7 +131,14 @@ fn lsblk() -> Option<Vec<PhysDisk>> {
                     "USB storage device".to_string()
                 } else {
                     // virtual disks (VMs) usually report no model; expose their bus instead
-                    format!("Virtual disk · {} bus", if tran.is_empty() { "virtual" } else { tran.as_str() })
+                    format!(
+                        "Virtual disk · {} bus",
+                        if tran.is_empty() {
+                            "virtual"
+                        } else {
+                            tran.as_str()
+                        }
+                    )
                 }
             } else {
                 m
@@ -126,8 +165,16 @@ fn fallback() -> Vec<PhysDisk> {
             let name = d.name().to_string_lossy().into_owned();
             let mount = d.mount_point().to_string_lossy().into_owned();
             PhysDisk {
-                dev: if name.is_empty() { mount.clone() } else { name.clone() },
-                model: if name.is_empty() { "Volume".into() } else { name },
+                dev: if name.is_empty() {
+                    mount.clone()
+                } else {
+                    name.clone()
+                },
+                model: if name.is_empty() {
+                    "Volume".into()
+                } else {
+                    name
+                },
                 size: total,
                 table: String::new(),
                 kind: d.kind().to_string(),
@@ -155,10 +202,24 @@ pub fn health(dev: &str) -> String {
     }
     #[cfg(not(windows))]
     {
-        let path = if dev.starts_with("/dev/") { dev.to_string() } else { format!("/dev/{dev}") };
-        match run("smartctl", &["-H", "-A", &path]) {
+        let path = if dev.starts_with("/dev/") {
+            dev.to_string()
+        } else {
+            format!("/dev/{dev}")
+        };
+        let args = ["-H", "-A", &path];
+        let direct = if program_available("smartctl") {
+            run("smartctl", &args)
+        } else {
+            None
+        };
+        #[cfg(target_os = "linux")]
+        let output = direct.or_else(|| run_as_admin("smartctl", &args));
+        #[cfg(not(target_os = "linux"))]
+        let output = direct;
+        match output {
             Some(o) => o,
-            None => "smartctl unavailable or permission denied.\nInstall smartmontools and run the app with the required privileges (e.g. `sudo`) to read S.M.A.R.T. data.".into(),
+            None => "smartctl is unavailable or access was denied. On Linux, install smartmontools and ensure polkit (pkexec) is available; MPSM will request authentication when elevated access is needed.".into(),
         }
     }
 }
@@ -175,6 +236,13 @@ pub fn open_partition_tool() -> bool {
     }
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
-        ["gparted", "partitionmanager", "gnome-disks", "kde-partitionmanager"].iter().any(|t| launch(t, &[]))
+        [
+            "gparted",
+            "partitionmanager",
+            "gnome-disks",
+            "kde-partitionmanager",
+        ]
+        .iter()
+        .any(|t| launch(t, &[]))
     }
 }

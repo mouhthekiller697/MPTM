@@ -44,7 +44,7 @@ function Shell() {
         <div className="hidden items-center gap-2 px-2 pb-4 pt-2 md:flex">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent font-black text-black">Fe</div>
           <div>
-            <div className="font-bold leading-tight">Ferrum Monitor</div>
+            <div className="font-bold leading-tight">MPSM</div>
             <div className="text-xs text-mute">System task manager</div>
           </div>
         </div>
